@@ -19,32 +19,100 @@
 #define STEERING_SIGNAL 15
 #define SWITCH_SIGNAL 16
 
-// define throttle zones
-#define THROTTLE_DEAD_ZONE 15 // cca 15%
+/* -------------------------------- */
+/* --- RC 1st chanel - steering --- */
+/* -------------------------------- */
 
 // define steering zones
 #define STEERING_CENTER 77          // 0%
 #define STEERING_LEFT_DEAD_ZONE 40  // cca 40%
 #define STEERING_RIGHT_DEAD_ZONE 28 // cca 40%
 
-// define switch positions
-#define NUMBER_OF_SWITCH_POSITIONS 4
-#define SWITCH_POSITION_A 1
-#define SWITCH_POSITION_NEUTRAL 2
-#define SWITCH_POSITION_B 3
+unsigned long TURN_SIGNAL_TIME1 = 0;
+unsigned long TURN_SIGNAL_TIME2;
+
+bool SIGNALS_STATUS = false;
+
+/* -------------------------------- */
+/* --- RC 2nd chanel - throttle --- */
+/* -------------------------------- */
+
+// define throttle zones
+#define THROTTLE_DEAD_ZONE 20 // cca 15%
+
+// define throttle zones
+#define HIGH_BEAM_THROTTLE 25 // cca 25%
+
+enum ThrottleStatus
+{
+  ACCELERATING,
+  IDLE,
+  BREAKING,
+  REVERSING,
+};
+#define SIZE_OF_THROTTLE_STATUS 10
+ThrottleStatus throttleStatus[SIZE_OF_THROTTLE_STATUS] = {IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE};
+
+/* ------------------------------ */
+/* --- RC 3rd chanel - switch --- */
+/* ------------------------------ */
+
+enum SwitchPosition
+{
+  POSITION_A = 1,
+  POSITION_NEUTRAL,
+  POSITION_B,
+  NUMBER_OF_SWITCH_POSITIONS
+};
 
 bool SWITCH_STATUS_A = false;
 bool SWITCH_STATUS_B = false;
-
-unsigned long TIME1 = 0;
-unsigned long TIME2;
-
-bool SIGNALS_STATUS = false;
 
 // initialize RC controller signals
 ServoInputPin<THROTTLE_SIGNAL> throttleSignal;
 ServoInputPin<STEERING_SIGNAL> steeringServo;
 ServoInputPin<SWITCH_SIGNAL> switchSignal;
+
+void pushThrottleStatus(ThrottleStatus value)
+{
+  // shift all elements to the left
+  for (int i = 0; i < SIZE_OF_THROTTLE_STATUS - 1; i++)
+  {
+    throttleStatus[i] = throttleStatus[i + 1];
+  }
+
+  // add new value to the end
+  throttleStatus[SIZE_OF_THROTTLE_STATUS - 1] = value;
+}
+
+ThrottleStatus getPreviousThrottleStatus()
+{
+  ThrottleStatus maxOccurrence;
+  int i, j, count;
+  int maxCount = 0;
+
+  for (i = 0; i < SIZE_OF_THROTTLE_STATUS; i++)
+  {
+    count = 1;
+    for (j = i + 1; j < SIZE_OF_THROTTLE_STATUS; j++)
+    {
+      if (throttleStatus[j] == throttleStatus[i])
+      {
+        count++;
+        if (count > maxCount)
+        {
+          maxOccurrence = throttleStatus[j];
+        }
+      }
+    }
+  }
+
+  return maxOccurrence;
+}
+
+/* -------------------------- */
+/* --- SETUP & INITIALIZE --- */
+/* -------------------------- */
 
 void setup()
 {
@@ -78,8 +146,14 @@ void setup()
   }
 }
 
+/* ----------------- */
+/* --- MAIN LOOP --- */
+/* ----------------- */
+
 void loop()
 {
+  digitalWrite(MAIN_LIGHTS, HIGH);
+
   float steeringAngle = steeringServo.getAngle();
 
   // Turning Left
@@ -87,12 +161,12 @@ void loop()
   {
     digitalWrite(LEFT_TURN_SIGNAL_LIGHTS, LOW);
 
-    unsigned long TIME2 = millis();
-    if (TIME2 - TIME1 >= 350)
+    unsigned long TURN_SIGNAL_TIME2 = millis();
+    if (TURN_SIGNAL_TIME2 - TURN_SIGNAL_TIME1 >= 350)
     {
       SIGNALS_STATUS = !SIGNALS_STATUS;
       digitalWrite(RIGHT_TURN_SIGNAL_LIGHTS, SIGNALS_STATUS);
-      TIME1 = millis();
+      TURN_SIGNAL_TIME1 = millis();
     }
   }
   // Turning Right
@@ -100,12 +174,12 @@ void loop()
   {
     digitalWrite(RIGHT_TURN_SIGNAL_LIGHTS, LOW);
 
-    unsigned long TIME2 = millis();
-    if (TIME2 - TIME1 >= 350)
+    unsigned long TURN_SIGNAL_TIME2 = millis();
+    if (TURN_SIGNAL_TIME2 - TURN_SIGNAL_TIME1 >= 350)
     {
       SIGNALS_STATUS = !SIGNALS_STATUS;
       digitalWrite(LEFT_TURN_SIGNAL_LIGHTS, SIGNALS_STATUS);
-      TIME1 = millis();
+      TURN_SIGNAL_TIME1 = millis();
     }
   }
   // Going Straight
@@ -115,30 +189,11 @@ void loop()
     digitalWrite(LEFT_TURN_SIGNAL_LIGHTS, LOW);
   }
 
-  int speed = throttleSignal.mapDeadzone(-100, 100, (THROTTLE_DEAD_ZONE * 0.01));
-  if (speed == 0)
-  {
-    // Serial.println("In throttle deadzone!");
-  }
-  if (speed > 0)
-  {
-    // Serial.print("Throttle: ");
-    // Serial.print(speed);
-    // Serial.println("%");
-  }
-  else
-  {
-    // Serial.print("Brake: ");
-    // Serial.print(abs(speed));
-    // Serial.println("%");
-  }
-
   int position = switchSignal.map(1, NUMBER_OF_SWITCH_POSITIONS);
-  Serial.println(position);
   switch (position)
   {
   // Fog lights control
-  case SWITCH_POSITION_A:
+  case POSITION_A:
     if (!SWITCH_STATUS_A)
     {
       SWITCH_STATUS_A = true;
@@ -151,7 +206,7 @@ void loop()
     }
     break;
 
-  case SWITCH_POSITION_B:
+  case POSITION_B:
     if (!SWITCH_STATUS_B)
     {
       SWITCH_STATUS_B = true;
@@ -164,10 +219,55 @@ void loop()
     }
     break;
 
-  case SWITCH_POSITION_NEUTRAL:
+  case POSITION_NEUTRAL:
   default:
     break;
   }
 
-  delay(500);
+  int speed = throttleSignal.mapDeadzone(-100, 100, (THROTTLE_DEAD_ZONE * 0.01));
+  if (speed == 0)
+  {
+    pushThrottleStatus(IDLE);
+    digitalWrite(HIGH_BEAM_LIGHTS, LOW);
+    digitalWrite(BREAK_LIGHTS, LOW);
+    digitalWrite(REVERSING_LIGHTS, LOW);
+  }
+  else if (speed > 0)
+  {
+    pushThrottleStatus(ACCELERATING);
+    if (speed >= HIGH_BEAM_THROTTLE)
+    {
+      digitalWrite(HIGH_BEAM_LIGHTS, HIGH);
+    }
+    else
+    {
+      if (!SWITCH_STATUS_B)
+      {
+        digitalWrite(HIGH_BEAM_LIGHTS, LOW);
+      }
+    }
+  }
+  // check for speed less then -1 to eliminate ocasional noise
+  else if (speed < -1)
+  {
+    const int previousThrottleStatus = getPreviousThrottleStatus();
+    if (previousThrottleStatus == ACCELERATING || previousThrottleStatus == BREAKING)
+    {
+      pushThrottleStatus(BREAKING);
+      digitalWrite(BREAK_LIGHTS, HIGH);
+    }
+    if (previousThrottleStatus == IDLE || previousThrottleStatus == REVERSING)
+    {
+      pushThrottleStatus(REVERSING);
+      digitalWrite(REVERSING_LIGHTS, HIGH);
+    }
+  }
+  else
+  {
+    digitalWrite(HIGH_BEAM_LIGHTS, LOW);
+    digitalWrite(BREAK_LIGHTS, LOW);
+    digitalWrite(REVERSING_LIGHTS, LOW);
+  }
+
+  delay(200);
 }
