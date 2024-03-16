@@ -38,7 +38,7 @@ bool SIGNALS_STATUS = false;
 /* -------------------------------- */
 
 // define throttle zones
-#define THROTTLE_DEAD_ZONE 20 // cca 15%
+#define THROTTLE_DEAD_ZONE 25 // cca 15%
 
 // define throttle zones
 #define HIGH_BEAM_THROTTLE 25 // cca 25%
